@@ -10,13 +10,14 @@
 //   anemll-profile model.mlpackage
 //   anemll-profile /path/to/model    # auto-finds .mlmodelc or .mlpackage
 //
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 
 #import <Foundation/Foundation.h>
 #import <CoreML/CoreML.h>
 #import <sys/wait.h>
 #import <mach/mach_time.h>
 #include <fcntl.h>
+#include <mach-o/dyld.h>
 
 // ── CostModelFeature parsed entry ──────────────────────────────────────────
 
@@ -199,10 +200,17 @@ int main(int argc, char *argv[]) {
 
         // os_log reads OS_ACTIVITY_DT_MODE during dyld init, before main() runs.
         // setenv() here is too late — re-exec so the variable is present from process start.
+        // Use _NSGetExecutablePath for reliable re-exec (argv[0] may be a bare name
+        // from PATH lookup, which fails with execv since it doesn't search PATH).
         if (!getenv("OS_ACTIVITY_DT_MODE")) {
             setenv("OS_ACTIVITY_DT_MODE", "YES", 1);
-            execv(argv[0], argv);
-            // If execv fails, continue anyway
+            char exepath[4096];
+            uint32_t sz = sizeof(exepath);
+            if (_NSGetExecutablePath(exepath, &sz) == 0)
+                execv(exepath, argv);
+            else
+                execvp(argv[0], argv);
+            // If re-exec fails, continue anyway
         }
 
         printf("anemll-profile %s\n", VERSION);
