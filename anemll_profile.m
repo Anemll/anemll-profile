@@ -547,7 +547,13 @@ int main(int argc, char *argv[]) {
         if (nUnique == 0) {
             printf("\n  ⚠ No CostModelFeature entries captured.\n");
             printf("  Try clearing cache: rm -rf ~/Library/Caches/anemll-profile/com.apple.e5rt*\n");
-            printf("  If cached, clear: rm -rf ~/Library/Caches/anemll-profile/com.apple.e5rt*\n");
+            goto cleanup;
+        }
+
+        // Detect <private> masking: many entries but only 1 unique means all names are "<private>"
+        if (nUnique == 1 && nEntries > 10 && strstr(unique[0].name, "private")) {
+            printf("\n  ⚠ Log data is masked (<private>). Run with:\n");
+            printf("    OS_ACTIVITY_DT_MODE=YES anemll-profile %s\n", modelArg);
             goto cleanup;
         }
 
