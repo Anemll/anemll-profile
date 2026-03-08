@@ -10,6 +10,8 @@
 //   anemll-profile model.mlpackage
 //   anemll-profile /path/to/model    # auto-finds .mlmodelc or .mlpackage
 //
+#define VERSION "0.3.0"
+
 #import <Foundation/Foundation.h>
 #import <CoreML/CoreML.h>
 #import <sys/wait.h>
@@ -195,8 +197,17 @@ int main(int argc, char *argv[]) {
     @autoreleasepool {
         setbuf(stdout, NULL);
 
-        // Ensure private log data is revealed (must be set before MLComputePlan loads Espresso)
-        setenv("OS_ACTIVITY_DT_MODE", "YES", 1); // 1 = overwrite even if already set
+        // os_log reads OS_ACTIVITY_DT_MODE during dyld init, before main() runs.
+        // setenv() here is too late — re-exec so the variable is present from process start.
+        if (!getenv("OS_ACTIVITY_DT_MODE")) {
+            setenv("OS_ACTIVITY_DT_MODE", "YES", 1);
+            execv(argv[0], argv);
+            // If execv fails, continue anyway
+        }
+
+        printf("anemll-profile %s\n", VERSION);
+        printf("(C) 2026 ANEMLL (pronounced like \"animal\")\n");
+        printf("Artificial Neural Engine Machine Learning Library, Open Source Project\n\n");
 
         // Parse flags
         MLComputeUnits computeUnits = MLComputeUnitsCPUAndNeuralEngine;
@@ -204,7 +215,9 @@ int main(int argc, char *argv[]) {
         const char *modelArg = NULL;
 
         for (int i = 1; i < argc; i++) {
-            if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--all")) {
+            if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--version")) {
+                return 0;
+            } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--all")) {
                 computeUnits = MLComputeUnitsAll;
                 unitsLabel = "All (CPU+GPU+ANE)";
             } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--cpu-ane")) {
@@ -220,6 +233,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "  Profiles CoreML models via MLComputePlan + Espresso CostModel.\n");
             fprintf(stderr, "  Accepts .mlmodelc, .mlpackage, or base path (auto-detects).\n\n");
             fprintf(stderr, "  Options:\n");
+            fprintf(stderr, "    -v, --version   Show version and exit\n");
             fprintf(stderr, "    -c, --cpu-ane   CPU + ANE (default)\n");
             fprintf(stderr, "    -a, --all       All devices incl. GPU\n\n");
             fprintf(stderr, "  Run: ./anemll-profile <model>\n");
