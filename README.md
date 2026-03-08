@@ -40,7 +40,7 @@ anemll-profile -a model.mlmodelc       # include GPU in device assignment
 
 ## Requirements
 
-- macOS 14+ (Sonnet) — requires `MLComputePlan` API
+- macOS 14+ (Sonoma) — requires `MLComputePlan` API
 - Xcode Command Line Tools
 
 ## License
