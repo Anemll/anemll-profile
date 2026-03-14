@@ -404,16 +404,14 @@ static int profileModel(NSString *displayName,
             [[NSProcessInfo processInfo] processName]]];
     NSString *globalCacheDir = [NSHomeDirectory() stringByAppendingPathComponent:
         @"Library/Caches/com.apple.e5rt.e5bundlecache"];
-    for (NSString *cacheDir in @[processCacheDir, globalCacheDir]) {
-        if ([fm fileExistsAtPath:cacheDir])
-            [fm removeItemAtPath:cacheDir error:nil];
-    }
+    for (NSString *cacheDir in @[processCacheDir, globalCacheDir])
+        [fm removeItemAtPath:cacheDir error:nil];
 
     startLogCapture();
 
     MLModelConfiguration *config = [[MLModelConfiguration alloc] init];
     config.computeUnits = computeUnits;
-    if (requestedFunctionName && supportsFunctionSelection()) {
+    if (requestedFunctionName) {
         if (@available(macOS 15.0, *)) config.functionName = requestedFunctionName;
     }
 
@@ -574,15 +572,15 @@ static int profileModel(NSString *displayName,
             done = YES;
         };
 
+    BOOL useModelAsset = NO;
     if (modelAsset) {
+        if (@available(macOS 14.4, *)) useModelAsset = YES;
+    }
+    if (useModelAsset) {
         if (@available(macOS 14.4, *)) {
             [MLComputePlan loadModelAsset:modelAsset
                             configuration:config
                         completionHandler:planHandler];
-        } else {
-            [MLComputePlan loadContentsOfURL:url
-                                configuration:config
-                            completionHandler:planHandler];
         }
     } else {
         [MLComputePlan loadContentsOfURL:url
@@ -601,17 +599,14 @@ static int profileModel(NSString *displayName,
     sleep(1);
     stopLogCapture();
 
-    if (planError) {
+    if (planError || selectionError) {
         if (g_logPath) [fm removeItemAtPath:g_logPath error:nil];
         g_logPath = nil;
-        fprintf(stderr, "MLComputePlan error: %s\n",
-            [[planError localizedDescription] UTF8String]);
-        return 1;
-    }
-    if (selectionError) {
-        if (g_logPath) [fm removeItemAtPath:g_logPath error:nil];
-        g_logPath = nil;
-        fprintf(stderr, "Error: %s\n", [selectionError UTF8String]);
+        if (planError)
+            fprintf(stderr, "MLComputePlan error: %s\n",
+                [[planError localizedDescription] UTF8String]);
+        else
+            fprintf(stderr, "Error: %s\n", [selectionError UTF8String]);
         return 1;
     }
 
@@ -627,13 +622,12 @@ static int profileModel(NSString *displayName,
     NSMutableDictionary *unsupportedReasons = [NSMutableDictionary dictionary];
 
     for (NSString *line in logLines) {
-        NSRange r = NSMakeRange(NSNotFound, 0);
         if (nEntries < MAX_ENTRIES) {
             CostEntry e;
             if (parseCostLine([line UTF8String], &e)) {
                 NSString *ns = [NSString stringWithUTF8String:e.name];
-                BOOL keepEntry = !(activeLogNames.count > 0 &&
-                                   ![activeLogNames containsObject:ns]);
+                BOOL keepEntry = (activeLogNames.count == 0 ||
+                                  [activeLogNames containsObject:ns]);
                 if (keepEntry) {
                     entries[nEntries++] = e;
                     if (![seenNames containsObject:ns]) {
@@ -644,7 +638,7 @@ static int profileModel(NSString *displayName,
             }
         }
 
-        r = [line rangeOfString:@"Unsupported op "];
+        NSRange r = [line rangeOfString:@"Unsupported op "];
         if (r.location != NSNotFound) {
             NSString *rest = [line substringFromIndex:r.location + r.length];
             NSScanner *sc = [NSScanner scannerWithString:rest];
@@ -787,7 +781,7 @@ static int profileModel(NSString *displayName,
         NSError *loadErr = nil;
         MLModelConfiguration *mcfg = [[MLModelConfiguration alloc] init];
         mcfg.computeUnits = computeUnits;
-        if (requestedFunctionName && supportsFunctionSelection()) {
+        if (requestedFunctionName) {
             if (@available(macOS 15.0, *)) mcfg.functionName = requestedFunctionName;
         }
         MLModel *model = loadModelForProfiling(url, modelAsset, mcfg, &loadErr);
