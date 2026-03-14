@@ -5,6 +5,7 @@ BIN="${1:-./anemll-profile}"
 FIXTURE="${2:-./tests/fixtures/multifunction.mlpackage}"
 TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/anemll-profile-test.XXXXXX")"
 trap 'rm -rf "$TMPDIR"' EXIT
+OS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -58,6 +59,7 @@ assert_contains "$TMPDIR/mul_two.out" "ios18.mul"
 assert_not_contains "$TMPDIR/mul_two.out" "ios18.add"
 
 run_capture all "$BIN" --all-functions "$FIXTURE"
+assert_count "$TMPDIR/all.out" "Compiling multifunction.mlpackage" 1
 assert_count "$TMPDIR/all.out" "ANE CostModel Report:" 2
 assert_contains "$TMPDIR/all.out" "Function:     add_one"
 assert_contains "$TMPDIR/all.out" "Function:     mul_two"
@@ -72,5 +74,12 @@ if "$BIN" --function add_one --all-functions "$FIXTURE" >"$TMPDIR/conflict.out" 
     fail "expected conflicting function selectors to fail"
 fi
 assert_contains "$TMPDIR/conflict.out" "mutually exclusive selectors"
+
+if (( OS_MAJOR < 15 )); then
+    if "$BIN" --list-functions "$FIXTURE" >"$TMPDIR/availability.out" 2>&1; then
+        fail "expected selector flags to fail on macOS 14"
+    fi
+    assert_contains "$TMPDIR/availability.out" "Multi-function options require macOS 15 or newer."
+fi
 
 echo "ok"

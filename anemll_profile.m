@@ -228,6 +228,15 @@ static BOOL supportsFunctionSelection(void) {
     return NO;
 }
 
+static NSError *functionSelectionAvailabilityError(void) {
+    return [NSError errorWithDomain:kANEMLLProfileErrorDomain
+                               code:1
+                           userInfo:@{
+                               NSLocalizedDescriptionKey:
+                                   @"Multi-function options require macOS 15 or newer."
+                           }];
+}
+
 static BOOL isMainFunctionName(NSString *functionName) {
     return functionName && [functionName isEqualToString:@"main"];
 }
@@ -242,14 +251,7 @@ static BOOL copyFunctionNamesForModelAsset(MLModelAsset *asset,
                                            NSArray<NSString *> **outNames,
                                            NSError **outError) {
     if (!supportsFunctionSelection()) {
-        if (outError) {
-            *outError = [NSError errorWithDomain:kANEMLLProfileErrorDomain
-                                            code:1
-                                        userInfo:@{
-                                            NSLocalizedDescriptionKey:
-                                                @"Multi-function options require macOS 15 or newer."
-                                        }];
-        }
+        if (outError) *outError = functionSelectionAvailabilityError();
         return NO;
     }
 
@@ -1042,7 +1044,9 @@ int main(int argc, char *argv[]) {
         MLComputeUnits computeUnits = MLComputeUnitsCPUAndNeuralEngine;
         const char *unitsLabel = "CPU+ANE";
         const char *modelArg = NULL;
+        const char *compiledModelArg = NULL;
         NSString *requestedFunctionName = nil;
+        NSString *displayNameOverride = nil;
         BOOL listFunctions = NO;
         BOOL allFunctions = NO;
 
@@ -1069,6 +1073,18 @@ int main(int argc, char *argv[]) {
                 allFunctions = YES;
             } else if (!strcmp(argv[i], "--list-functions")) {
                 listFunctions = YES;
+            } else if (!strcmp(argv[i], "--compiled-model")) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: %s requires a compiled model path.\n", argv[i]);
+                    return 1;
+                }
+                compiledModelArg = argv[++i];
+            } else if (!strcmp(argv[i], "--display-name")) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: %s requires a display name.\n", argv[i]);
+                    return 1;
+                }
+                displayNameOverride = [NSString stringWithUTF8String:argv[++i]];
             } else if (!strcmp(argv[i], "--no-banner")) {
                 continue;
             } else if (argv[i][0] == '-') {
@@ -1096,17 +1112,27 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        NSString *displayName = nil;
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *displayName = displayNameOverride;
         BOOL needsCompile = NO;
-        NSString *modelPath = resolveModelPath(modelArg, &displayName, &needsCompile);
-        if (!modelPath) {
-            fprintf(stderr, "Error: cannot find model at '%s'\n", modelArg);
-            fprintf(stderr, "Tried: %s.mlmodelc, %s.mlpackage\n", modelArg, modelArg);
-            return 1;
+        NSString *modelPath = nil;
+        if (compiledModelArg) {
+            modelPath = [NSString stringWithUTF8String:compiledModelArg];
+            if (!displayName) displayName = [modelPath lastPathComponent];
+            if (![fm fileExistsAtPath:modelPath]) {
+                fprintf(stderr, "Error: cannot find compiled model at '%s'\n", compiledModelArg);
+                return 1;
+            }
+        } else {
+            modelPath = resolveModelPath(modelArg, &displayName, &needsCompile);
+            if (!modelPath) {
+                fprintf(stderr, "Error: cannot find model at '%s'\n", modelArg);
+                fprintf(stderr, "Tried: %s.mlmodelc, %s.mlpackage\n", modelArg, modelArg);
+                return 1;
+            }
         }
 
         NSString *modelcPath = modelPath;
-        NSFileManager *fm = [NSFileManager defaultManager];
         if (needsCompile) {
             printf("Compiling %s ...\n", [displayName UTF8String]);
             NSString *outDir = NSTemporaryDirectory();
@@ -1135,6 +1161,12 @@ int main(int argc, char *argv[]) {
         NSArray<NSString *> *assetFunctionNames = nil;
         BOOL needsFunctionDiscovery = listFunctions || allFunctions || requestedFunctionName != nil;
         if (needsFunctionDiscovery) {
+            if (!supportsFunctionSelection()) {
+                NSError *availabilityError = functionSelectionAvailabilityError();
+                fprintf(stderr, "Error: %s\n",
+                        [[availabilityError localizedDescription] UTF8String]);
+                return 1;
+            }
             NSError *functionError = nil;
             if (!modelAsset) {
                 fprintf(stderr, "Error: %s\n", [[assetError localizedDescription] UTF8String]);
@@ -1196,6 +1228,10 @@ int main(int argc, char *argv[]) {
                     [arguments addObject:@"--no-banner"];
                     if (computeUnits == MLComputeUnitsAll)
                         [arguments addObject:@"--all"];
+                    [arguments addObject:@"--compiled-model"];
+                    [arguments addObject:modelcPath];
+                    [arguments addObject:@"--display-name"];
+                    [arguments addObject:displayName];
                     [arguments addObject:@"--function"];
                     [arguments addObject:assetFunctionNames[i]];
                     [arguments addObject:[NSString stringWithUTF8String:modelArg]];
